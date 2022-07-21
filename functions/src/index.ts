@@ -1,6 +1,7 @@
 import * as functions from "firebase-functions";
 import * as firestore from "firebase-admin/firestore";
 import * as admin from "firebase-admin";
+import { threadutils } from "./utils/utils"
 
 // // Start writing Firebase Functions
 // // https://firebase.google.com/docs/functions/typescript
@@ -55,7 +56,7 @@ export const createThread = functions.https.onCall(async (data, context) => {
     };
   }
   try {
-    const memberGroup = createMemberGroup(uid, friendUid);
+    const memberGroup = threadutils.createMemberGroup(uid, friendUid);
     const newData = <Thread>{
       create_time: firestore.FieldValue.serverTimestamp(),
       members: memberGroup,
@@ -73,10 +74,3 @@ export const createThread = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError("not-found", "email does not exist");
   }
 });
-
-function createMemberGroup(uid: string, friendUid: string): { [key: string]: boolean} {
-  const memberGroup: { [key: string]: boolean} = {};
-  memberGroup[uid] = true;
-  memberGroup[friendUid] = true;
-  return memberGroup;
-}
