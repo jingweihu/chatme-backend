@@ -67,7 +67,7 @@ export const createThread = functions.https.onCall(async (data, context) => {
       id: ref.id,
       create_at: existingThread.create_at,
       new_create: false,
-      members: existingThread.members,
+      members: Object.keys(existingThread.members),
     };
   }
   try {
@@ -83,7 +83,7 @@ export const createThread = functions.https.onCall(async (data, context) => {
       id: ref.id,
       create_at: newThread.create_at,
       new_create: true,
-      members: newThread.members,
+      members: Object.keys(newThread.members),
     };
   } catch (errr) {
     throw new functions.https.HttpsError("not-found", "email does not exist");
