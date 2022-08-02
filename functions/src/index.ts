@@ -17,15 +17,16 @@ admin.initializeApp();
 const db = firestore.getFirestore();
 
 interface Thread {
-    create_at: firestore.Timestamp,
-    new_create: boolean,
+    threadId: string,
+    createAt: firestore.Timestamp,
     members: { [key: string]: boolean}
 }
 
 interface Message {
-    create_at: firestore.Timestamp,
+    messageId: string,
+    createAt: firestore.Timestamp,
     message: string,
-    sender_id: string,
+    senderId: string,
     type: string
 }
 
@@ -42,11 +43,10 @@ const messageConverter = {
 };
 
 export const createThread = functions.https.onCall(async (data, context) => {
-  const uid = context.auth?.uid as string;
-  functions.logger.log("uid is", uid);
+  const uid = (context.auth?.uid ?? data.uid) as string;
   if (!(typeof uid === "string") || uid.length === 0 ) {
     throw new functions.https.HttpsError("failed-precondition",
-        "The createThread must be called for a login user");
+        "The user needs login again");
   }
   const friendEmail = data.email;
   if (!(typeof friendEmail === "string") || friendEmail.length === 0 ) {
@@ -60,40 +60,30 @@ export const createThread = functions.https.onCall(async (data, context) => {
       .withConverter(threadConverter)
       .get();
   if (!result.empty) {
-    const ref = result.docs[0];
-    const existingThread = ref.data();
-
-    return {
-      id: ref.id,
-      create_at: existingThread.create_at,
-      new_create: false,
-      members: Object.keys(existingThread.members),
-    };
+    throw new functions.https.HttpsError("already-exists",
+        `You already has a thread with ${friendEmail}`);
   }
   try {
+    const ref = db.collection("threads").doc();
     const memberGroup = threadutils.createMemberGroup(uid, friendUid);
     const newData = <Thread>{
-      create_at: firestore.FieldValue.serverTimestamp(),
+      createAt: firestore.FieldValue.serverTimestamp(),
       members: memberGroup,
+      threadId: ref.id,
     };
-    const ref = await db.collection("threads").add(newData);
-    const doc = await ref.get();
-    const newThread = doc.data() as Thread;
-    return {
-      id: ref.id,
-      create_at: newThread.create_at,
-      new_create: true,
-      members: Object.keys(newThread.members),
-    };
+    await db.collection("threads").doc(ref.id).set(newData);
+
+    return JSON.stringify({
+      threadId: ref.id,
+    });
   } catch (errr) {
     throw new functions.https.HttpsError("not-found", "email does not exist");
   }
 });
 
-
 export const getThreadInfo = functions.https.onCall(async (data, context) => {
-  const threadId = data.thread_id as string;
-  const threadRef = await db.collection("threads").doc(threadId);
+  const threadId = data.threadId as string;
+  const threadRef = db.collection("threads").doc(threadId);
   const thread = (await threadRef.get()).data() as Thread;
 
   const members: UserRecord[] = [];
@@ -106,7 +96,7 @@ export const getThreadInfo = functions.https.onCall(async (data, context) => {
   const query = await db.collection("threads")
       .doc(threadRef.id)
       .collection("messages")
-      .orderBy("create_at", "desc")
+      .orderBy("createAt", "desc")
       .limitToLast(1)
       .withConverter(messageConverter)
       .get();
@@ -118,12 +108,21 @@ export const getThreadInfo = functions.https.onCall(async (data, context) => {
   } else {
     message = null;
   }
-  return {
-    id: threadRef.id,
-    create_at: thread.create_at,
+  return JSON.stringify({
+    threadId: threadRef.id,
+    createAt: thread.createAt,
     members: members,
-    last_message: message,
-  };
+    lastMessage: message,
+  });
 });
 
+
+export const messageSent = functions.firestore
+  .document("/threads/{threadId}/messages/{messageId}")
+  .onCreate((change, context) => {
+    const lastMessage = change.data();
+    db.collection("threads").doc(context.params.threadId).update({
+      message: lastMessage,
+    });
+  });
 
