@@ -53,7 +53,12 @@ export const createThread = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError("invalid-argument",
         "email is not valid");
   }
-  const friendUid = (await admin.auth().getUserByEmail(friendEmail)).uid as string;
+  let friendUid: string;
+  try {
+    friendUid = (await admin.auth().getUserByEmail(friendEmail)).uid;
+  } catch (errr) {
+    throw new functions.https.HttpsError("not-found", "email does not exist");
+  }
   const result = await db.collection("threads")
       .where(`members.${uid}`, "==", true)
       .where(`members.${friendUid}`, "==", true)
@@ -63,22 +68,18 @@ export const createThread = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError("already-exists",
         `You already has a thread with ${friendEmail}`);
   }
-  try {
-    const ref = db.collection("threads").doc();
-    const memberGroup = threadutils.createMemberGroup(uid, friendUid);
-    const newData = <Thread>{
-      createAt: firestore.FieldValue.serverTimestamp(),
-      members: memberGroup,
-      threadId: ref.id,
-    };
-    await db.collection("threads").doc(ref.id).set(newData);
+  const ref = db.collection("threads").doc();
+  const memberGroup = threadutils.createMemberGroup(uid, friendUid);
+  const newData = <Thread>{
+    createAt: firestore.FieldValue.serverTimestamp(),
+    members: memberGroup,
+    threadId: ref.id,
+  };
+  await db.collection("threads").doc(ref.id).set(newData);
 
-    return JSON.stringify({
-      threadId: ref.id,
-    });
-  } catch (errr) {
-    throw new functions.https.HttpsError("not-found", "email does not exist");
-  }
+  return JSON.stringify({
+    threadId: ref.id,
+  });
 });
 
 export const getThreadInfo = functions.https.onCall(async (data, context) => {
@@ -118,11 +119,11 @@ export const getThreadInfo = functions.https.onCall(async (data, context) => {
 
 
 export const messageSent = functions.firestore
-  .document("/threads/{threadId}/messages/{messageId}")
-  .onCreate((change, context) => {
-    const lastMessage = change.data();
-    db.collection("threads").doc(context.params.threadId).update({
-      message: lastMessage,
+    .document("/threads/{threadId}/messages/{messageId}")
+    .onCreate((change, context) => {
+      const lastMessage = change.data();
+      db.collection("threads").doc(context.params.threadId).update({
+        message: lastMessage,
+      });
     });
-  });
 
