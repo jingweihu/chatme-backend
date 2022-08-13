@@ -2,8 +2,6 @@ import * as functions from "firebase-functions";
 import * as firestore from "firebase-admin/firestore";
 import * as admin from "firebase-admin";
 import {threadutils} from "./utils/utils";
-import {UserRecord} from "firebase-functions/v1/auth";
-import {auth} from "firebase-admin";
 
 // // Start writing Firebase Functions
 // // https://firebase.google.com/docs/functions/typescript
@@ -20,6 +18,7 @@ interface Thread {
     threadId: string,
     createAt: firestore.Timestamp,
     members: { [key: string]: boolean}
+    lastMessage: Message | null
 }
 
 interface Message {
@@ -30,16 +29,17 @@ interface Message {
     type: string
 }
 
+interface User {
+   email: string | null,
+   displayName: string | null,
+   photoURL: string | null,
+   uid: string
+}
+
 const threadConverter = {
   toFirestore: (data: Thread) => data,
   fromFirestore: (snap: FirebaseFirestore.QueryDocumentSnapshot) =>
       snap.data() as Thread,
-};
-
-const messageConverter = {
-  toFirestore: (data: Message) => data,
-  fromFirestore: (snap: FirebaseFirestore.QueryDocumentSnapshot) =>
-        snap.data() as Message,
 };
 
 export const createThread = functions.https.onCall(async (data, context) => {
@@ -74,6 +74,7 @@ export const createThread = functions.https.onCall(async (data, context) => {
     createAt: firestore.FieldValue.serverTimestamp(),
     members: memberGroup,
     threadId: ref.id,
+    lastMessage: null,
   };
   await db.collection("threads").doc(ref.id).set(newData);
 
@@ -87,34 +88,20 @@ export const getThreadInfo = functions.https.onCall(async (data, context) => {
   const threadRef = db.collection("threads").doc(threadId);
   const thread = (await threadRef.get()).data() as Thread;
 
-  const members: UserRecord[] = [];
+  const members: User[] = [];
   for (const uid in thread.members) {
     if (uid != null) {
-      const record = await auth().getUser(uid);
+      const record = (await db.collection("users").doc(uid).get()).data() as User;
       members.push(record);
     }
   }
-  const query = await db.collection("threads")
-      .doc(threadRef.id)
-      .collection("messages")
-      .orderBy("createAt", "desc")
-      .limitToLast(1)
-      .withConverter(messageConverter)
-      .get();
 
-  let message : Message | null;
-  if (!query.empty) {
-    const ref = query.docs[0];
-    message = ref.data();
-  } else {
-    message = null;
-  }
-  return JSON.stringify({
+  return {
     threadId: threadRef.id,
-    createAt: thread.createAt,
+    createAt: thread.createAt.toMillis(),
     members: members,
-    lastMessage: message,
-  });
+    lastMessage: thread.lastMessage,
+  };
 });
 
 
@@ -123,7 +110,18 @@ export const messageSent = functions.firestore
     .onCreate((change, context) => {
       const lastMessage = change.data();
       db.collection("threads").doc(context.params.threadId).update({
-        message: lastMessage,
+        lastMessage: lastMessage,
       });
     });
 
+export const onUserCreate = functions.auth.user().onCreate((user) => {
+  const data: User = {
+    uid: user.uid,
+    displayName: user.displayName !== undefined ? user.displayName : "",
+    email: user.email !== undefined ? user.email : "",
+    photoURL: user.photoURL !== undefined ? user.photoURL : "",
+  };
+
+  db.collection("users")
+      .doc(user.uid).set(data);
+});
