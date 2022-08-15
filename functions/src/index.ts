@@ -98,7 +98,7 @@ export const getThreadInfo = functions.https.onCall(async (data, context) => {
 
   return {
     threadId: threadRef.id,
-    createAt: thread.createAt.toMillis(),
+    createAt: thread.createAt,
     members: members,
     lastMessage: thread.lastMessage,
   };
